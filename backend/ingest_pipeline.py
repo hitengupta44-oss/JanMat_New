@@ -2,7 +2,6 @@
 Orchestrates one full ingestion run:
   discover URLs -> fetch+extract full text (PDF or HTML) -> chunk -> embed
   -> upsert into Supabase.
-
 Nothing here summarizes. A document that hasn't changed since last run
 (same sha256 of its full text) is skipped entirely to save embedding calls.
 """
@@ -13,7 +12,7 @@ from typing import List
 import db
 from config import CONFIG
 from embeddings import chunk_pages, chunk_text, embed_texts
-from pdf_ingest import ingest_source_document
+from pdf_ingest import ingest_source_document, BlockedHostError
 from scraper import PRSDiscovery, DiscoveredDocument, discover_article_seed_urls
 
 logger = logging.getLogger("janmat.ingest_pipeline")
@@ -24,6 +23,19 @@ def _ingest_one(doc: DiscoveredDocument) -> dict:
     result = {"url": doc.url, "status": "skipped", "chunks": 0}
     try:
         extracted = ingest_source_document(doc.url)
+    except BlockedHostError:
+        # Known-unreachable host — not a real failure, so don't log a
+        # traceback or write a failed row to `documents`.
+        result["status"] = "skipped_blocked_host"
+        return result
+    except Exception as exc:
+        logger.warning("Failed ingesting %s: %s", doc.url, exc)
+        db.mark_document_failed(doc.url, doc.source, doc.kind, doc.title, str(exc))
+        result["status"] = "failed"
+        result["error"] = str(exc)
+        return result
+
+    try:
         full_text = extracted["full_text"]
         if not full_text.strip():
             result["status"] = "empty"
@@ -88,7 +100,32 @@ def run_ingestion() -> dict:
     started_at = datetime.now(timezone.utc).isoformat()
     run_id = db.start_ingestion_run(started_at)
 
-    summary = {"documents_seen": 0, "ingested": 0, "unchanged": 0, "failed": 0, "results": []}
+    summary = {
+        "documents_seen": 0,
+        "ingested": 0,
+        "unchanged": 0,
+        "failed": 0,
+        "skipped": 0,
+        "results": [],
+    }
+
+    # Multiple bill pages often link to the same PDF. Without this guard the
+    # same file gets fetched, extracted and embedded once per referring page —
+    # wasted time, and repeated failures cluttering the log when a PDF is
+    # unreachable.
+    processed_urls = set()
+
+    def _record(result: dict) -> None:
+        summary["documents_seen"] += 1
+        summary["results"].append(result)
+        if result["status"] == "ingested":
+            summary["ingested"] += 1
+        elif result["status"] == "unchanged":
+            summary["unchanged"] += 1
+        elif result["status"] == "failed":
+            summary["failed"] += 1
+        elif result["status"] == "skipped_blocked_host":
+            summary["skipped"] += 1
 
     try:
         # 1. PRS bills: bill pages + any PDFs those pages link to.
@@ -98,39 +135,26 @@ def run_ingestion() -> dict:
         queue: List[DiscoveredDocument] = list(bill_pages)
 
         for bill_doc in bill_pages:
+            if bill_doc.url in processed_urls:
+                continue
+            processed_urls.add(bill_doc.url)
+
             r = _ingest_one(bill_doc)
-            summary["documents_seen"] += 1
-            summary["results"].append(r)
-            if r["status"] == "ingested":
-                summary["ingested"] += 1
-            elif r["status"] == "unchanged":
-                summary["unchanged"] += 1
-            elif r["status"] == "failed":
-                summary["failed"] += 1
+            _record(r)
 
             for pdf_url in r.get("extra_pdf_links", []):
+                if pdf_url in processed_urls:
+                    continue
+                processed_urls.add(pdf_url)
                 pdf_doc = discovery.discover_pdfs_from_bill_page(bill_doc, [pdf_url])[0]
-                pr = _ingest_one(pdf_doc)
-                summary["documents_seen"] += 1
-                summary["results"].append(pr)
-                if pr["status"] == "ingested":
-                    summary["ingested"] += 1
-                elif pr["status"] == "unchanged":
-                    summary["unchanged"] += 1
-                elif pr["status"] == "failed":
-                    summary["failed"] += 1
+                _record(_ingest_one(pdf_doc))
 
         # 2. Any additional article/opinion seed URLs from config.
         for article_doc in discover_article_seed_urls(CONFIG["article_seed_urls"]):
-            r = _ingest_one(article_doc)
-            summary["documents_seen"] += 1
-            summary["results"].append(r)
-            if r["status"] == "ingested":
-                summary["ingested"] += 1
-            elif r["status"] == "unchanged":
-                summary["unchanged"] += 1
-            elif r["status"] == "failed":
-                summary["failed"] += 1
+            if article_doc.url in processed_urls:
+                continue
+            processed_urls.add(article_doc.url)
+            _record(_ingest_one(article_doc))
 
         db.finish_ingestion_run(run_id, datetime.now(timezone.utc).isoformat(), "success", summary)
     except Exception as exc:
