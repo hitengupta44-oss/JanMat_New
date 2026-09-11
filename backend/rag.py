@@ -6,6 +6,7 @@ templated or copy-pasted response — citing which document each part came
 from.
 """
 import logging
+import re
 from typing import List, Optional
 
 import requests
@@ -21,7 +22,6 @@ GROQ_URL = "https://api.groq.com/openai/v1/chat/completions"
 SYSTEM_PROMPT = """You are JanMat, an assistant that answers questions about Indian \
 legislative bills, their PRS Legislative Research briefs, related news articles, and \
 public opinion submissions.
-
 Rules:
 - Answer using the numbered SOURCE excerpts provided below. Do not invent facts that \
 aren't supported by them.
@@ -32,6 +32,12 @@ single source's sentence.
 - If the sources give a fuller picture together than any one of them alone, weave that \
 together rather than picking one source and ignoring the rest.
 - After each claim, cite the source number(s) it came from, like [1] or [2,3].
+- Explain the substance in your own words. Short quoted phrases are fine where \
+the exact legal wording matters, but don't string together long verbatim passages \
+from the source text — the point is to make the material understandable, not to \
+reproduce it.
+- Only cite a source if you actually used it for that claim. Don't add citations \
+to look thorough.
 - If the sources don't contain enough information to answer, say so plainly instead of \
 guessing.
 - Keep the answer in plain, accessible language — assume the reader is a citizen, not \
@@ -75,10 +81,53 @@ def _call_groq(messages: list, temperature: float = 0.3) -> str:
     return resp.json()["choices"][0]["message"]["content"]
 
 
+def _extract_cited_numbers(answer: str, max_n: int) -> List[int]:
+    """
+    Find which source numbers the model actually cited, e.g. [1], [2,3],
+    [4, 5]. Returns them sorted and de-duplicated, ignoring any number
+    outside the range of sources we actually supplied.
+    """
+    cited = set()
+    for group in re.findall(r"\[([\d\s,]+)\]", answer):
+        for part in group.split(","):
+            part = part.strip()
+            if part.isdigit():
+                n = int(part)
+                if 1 <= n <= max_n:
+                    cited.add(n)
+    return sorted(cited)
+
+
+def _renumber_answer(answer: str, old_to_new: dict) -> str:
+    """
+    After dropping uncited sources, the surviving ones are renumbered 1..N.
+    Rewrite the markers in the answer text to match, so [12] becomes [3] if
+    source 12 is now the third in the list.
+    """
+    def replace(match):
+        seen = []
+        for part in match.group(1).split(","):
+            part = part.strip()
+            if part.isdigit() and int(part) in old_to_new:
+                new = str(old_to_new[int(part)])
+                # Two chunks from the same document map to the same new
+                # number — don't emit "[1,1]".
+                if new not in seen:
+                    seen.append(new)
+        return f"[{','.join(seen)}]" if seen else ""
+
+    return re.sub(r"\[([\d\s,]+)\]", replace, answer)
+
+
 def answer_question(session_id: str, question: str, filter_kind: Optional[str] = None) -> dict:
     """
     Returns:
       {"answer": str, "citations": [{"n": 1, "title":.., "url":.., "kind":.., "document_id":..}], "chunks_used": int}
+    Note: `citations` contains only the sources the model actually cited in
+    its answer — not every chunk that was retrieved. Retrieval deliberately
+    pulls a broad set of candidates (TOP_K_CHUNKS) so the model has enough
+    context to work with, but listing all of them under the answer would be
+    misleading: most retrieved chunks don't end up informing the response.
     """
     chunks = retrieve(question, filter_kind=filter_kind)
     if not chunks:
@@ -107,16 +156,36 @@ def answer_question(session_id: str, question: str, filter_kind: Optional[str] =
 
     answer = _call_groq(messages)
 
-    citations = [
-        {
-            "n": i + 1,
-            "document_id": c["document_id"],
-            "title": c["title"],
-            "url": c["url"],
-            "kind": c["kind"],
-            "page_number": c.get("page_number"),
-        }
-        for i, c in enumerate(chunks)
-    ]
+    # Keep only the sources the model actually cited. Multiple chunks often
+    # come from the same document, so also de-duplicate by URL — citing the
+    # same PDF three times as [2], [7], [13] is noise, not precision.
+    cited_numbers = _extract_cited_numbers(answer, len(chunks))
+
+    citations = []
+    old_to_new = {}
+    seen_urls = {}
+    for n in cited_numbers:
+        c = chunks[n - 1]
+        url = c["url"]
+        if url in seen_urls:
+            # Already citing this document — point this marker at the
+            # existing entry instead of adding a duplicate.
+            old_to_new[n] = seen_urls[url]
+            continue
+        new_n = len(citations) + 1
+        seen_urls[url] = new_n
+        old_to_new[n] = new_n
+        citations.append(
+            {
+                "n": new_n,
+                "document_id": c["document_id"],
+                "title": c["title"],
+                "url": url,
+                "kind": c["kind"],
+                "page_number": c.get("page_number"),
+            }
+        )
+
+    answer = _renumber_answer(answer, old_to_new)
 
     return {"answer": answer, "citations": citations, "chunks_used": len(chunks)}
