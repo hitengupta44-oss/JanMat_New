@@ -1,11 +1,9 @@
 """
 JanMat — single Gradio Space.
-
 Replaces the old bills/themes/sentiment dashboard with a chat interface that
 answers questions using Groq, grounded in the full text of scraped PRS bill
 pages + PDFs + articles (stored in Supabase), with optional voice in/out via
 Sarvam AI.
-
 Everything lives in this one Space, same as your original setup — no
 separate frontend needed.
 """
@@ -152,6 +150,7 @@ def ingestion_status_fn(secret):
         f"Last run — seen: {summary.get('documents_seen', 0)}, "
         f"ingested: {summary.get('ingested', 0)}, "
         f"unchanged: {summary.get('unchanged', 0)}, "
+        f"skipped: {summary.get('skipped', 0)}, "
         f"failed: {summary.get('failed', 0)}"
     )
 
