@@ -7,6 +7,8 @@
  * Usage: <JanMatChatWidget spaceUrl="https://beastzzz-janmat.hf.space" />
  */
 import { useState } from "react";
+import ReactMarkdown from "react-markdown";
+import remarkGfm from "remark-gfm";
 
 async function callGradioApi(spaceUrl, apiName, payload) {
   const base = spaceUrl.replace(/\/$/, "");
@@ -145,14 +147,90 @@ export default function JanMatChatWidget({ spaceUrl }) {
         )}
         {messages.map((m, i) => (
           <div key={i} className={m.role === "user" ? "text-right" : "text-left"}>
-            <span
-              className={
-                "inline-block rounded-sm px-3 py-2 max-w-[85%] text-sm whitespace-pre-wrap font-body " +
-                (m.role === "user" ? "bg-ink text-paper" : "bg-paper border border-paper-line text-ink")
-              }
-            >
-              {m.content}
-            </span>
+            {m.role === "user" ? (
+              <span className="inline-block rounded-sm px-3 py-2 max-w-[85%] text-sm whitespace-pre-wrap font-body bg-ink text-paper">
+                {m.content}
+              </span>
+            ) : (
+              // Answers come back as markdown (headings, bold, tables, lists).
+              // Rendering it rather than printing raw ** and ### keeps long
+              // legislative answers readable. Each element is styled to match
+              // the site's paper/ink type rather than browser defaults.
+              <div className="inline-block rounded-sm px-4 py-3 max-w-[92%] text-left bg-paper border border-paper-line text-ink">
+                <ReactMarkdown
+                  remarkPlugins={[remarkGfm]}
+                  components={{
+                    h1: ({ children }) => (
+                      <h4 className="font-display text-base text-ink mt-3 mb-1.5 first:mt-0">{children}</h4>
+                    ),
+                    h2: ({ children }) => (
+                      <h4 className="font-display text-base text-ink mt-3 mb-1.5 first:mt-0">{children}</h4>
+                    ),
+                    h3: ({ children }) => (
+                      <h5 className="font-display text-sm text-ink mt-3 mb-1 first:mt-0">{children}</h5>
+                    ),
+                    p: ({ children }) => (
+                      <p className="font-body text-sm leading-relaxed text-ink mb-2 last:mb-0">{children}</p>
+                    ),
+                    ul: ({ children }) => (
+                      <ul className="list-disc pl-5 mb-2 space-y-1 font-body text-sm text-ink">{children}</ul>
+                    ),
+                    ol: ({ children }) => (
+                      <ol className="list-decimal pl-5 mb-2 space-y-1 font-body text-sm text-ink">{children}</ol>
+                    ),
+                    li: ({ children }) => <li className="leading-relaxed">{children}</li>,
+                    strong: ({ children }) => <strong className="font-semibold text-ink">{children}</strong>,
+                    em: ({ children }) => <em className="italic">{children}</em>,
+                    a: ({ href, children }) => (
+                      <a
+                        href={href}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="underline decoration-paper-line hover:decoration-ink break-words"
+                      >
+                        {children}
+                      </a>
+                    ),
+                    code: ({ inline, children }) =>
+                      inline ? (
+                        <code className="font-mono text-[0.8em] bg-paper-line/40 px-1 py-0.5 rounded-sm">
+                          {children}
+                        </code>
+                      ) : (
+                        <code className="block font-mono text-xs bg-paper-line/30 p-2 rounded-sm overflow-x-auto my-2">
+                          {children}
+                        </code>
+                      ),
+                    hr: () => <hr className="border-paper-line my-3" />,
+                    blockquote: ({ children }) => (
+                      <blockquote className="border-l-2 border-paper-line pl-3 italic text-ink-faint my-2">
+                        {children}
+                      </blockquote>
+                    ),
+                    // Tables are common in these answers (provision/effect
+                    // comparisons) and need horizontal scroll on mobile.
+                    table: ({ children }) => (
+                      <div className="overflow-x-auto my-3">
+                        <table className="w-full text-left border-collapse text-xs font-body">{children}</table>
+                      </div>
+                    ),
+                    thead: ({ children }) => <thead className="border-b border-paper-line">{children}</thead>,
+                    th: ({ children }) => (
+                      <th className="py-1.5 pr-3 font-mono text-[10px] uppercase tracking-wide text-ink-faint align-top">
+                        {children}
+                      </th>
+                    ),
+                    td: ({ children }) => (
+                      <td className="py-1.5 pr-3 align-top border-b border-paper-line/50 leading-relaxed">
+                        {children}
+                      </td>
+                    ),
+                  }}
+                >
+                  {m.content}
+                </ReactMarkdown>
+              </div>
+            )}
           </div>
         ))}
         {loading && <p className="font-mono text-xs text-ink-faint">Thinking…</p>}
