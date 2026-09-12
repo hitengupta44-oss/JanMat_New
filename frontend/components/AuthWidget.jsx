@@ -59,13 +59,19 @@ export default function AuthWidget() {
         });
         if (error) throw error;
 
-        // If email confirmation is enabled in Supabase, signUp returns a
-        // user but no session — the account isn't usable yet. Say so
-        // plainly rather than appearing to succeed silently.
+        // A user with no session means one of two things, and Supabase
+        // deliberately doesn't distinguish them (it's an anti-enumeration
+        // measure so attackers can't probe which emails are registered):
+        //   1. email confirmation is enabled and a mail was sent, or
+        //   2. this email is ALREADY registered.
+        // Case 2 is the common one in practice, so the message covers both
+        // rather than sending people to an inbox that will stay empty.
         if (data.user && !data.session) {
           setMessage({
-            type: "success",
-            text: "Account created. Check your email to confirm before signing in.",
+            type: "error",
+            text:
+              "That email may already be registered — try signing in. " +
+              "(If your account was set up before passwords were enabled, ask the admin to remove it so you can re-register.)",
           });
         } else {
           setMessage({ type: "success", text: "Account created — you're signed in." });
