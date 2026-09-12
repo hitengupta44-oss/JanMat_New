@@ -1,22 +1,34 @@
 "use client";
 
 /**
- * Simple email login — Supabase Auth's magic link flow, no passwords to
- * manage. Shows a sign-in form when logged out, and the user's email +
- * a sign-out button when logged in.
+ * Email + password authentication.
  *
- * Usage: <AuthWidget /> — put it once near the top of the page. Other
- * components (like CommentSection) read the session directly from
- * supabase.auth themselves, so they stay in sync automatically.
+ * Chosen over magic links because Supabase's built-in email service is
+ * rate-limited to a handful of messages per hour (it's intended for
+ * development, not production), which made magic links unusable without
+ * configuring an external SMTP provider. Password auth sends no email at
+ * all on sign-in, so there's no limit to hit — and it's faster for the
+ * user, who doesn't have to leave the page to check an inbox.
+ *
+ * NOTE: for sign-up to work without email, "Confirm email" must be turned
+ * OFF in Supabase → Authentication → Sign In / Providers → Email. If it's
+ * left on, Supabase still sends a confirmation email and the account stays
+ * unusable until it's clicked — which reintroduces the rate limit problem.
+ *
+ * Usage: <AuthWidget /> — place once near the top of the page. Other
+ * components (CommentSection) read the session from supabase.auth directly,
+ * so they stay in sync automatically.
  */
 import { useEffect, useState } from "react";
 import { supabase } from "../lib/supabaseClient";
 
 export default function AuthWidget() {
   const [session, setSession] = useState(null);
+  const [mode, setMode] = useState("signin"); // "signin" | "signup"
   const [email, setEmail] = useState("");
-  const [status, setStatus] = useState("idle"); // idle | sending | sent | error
-  const [errorMsg, setErrorMsg] = useState("");
+  const [password, setPassword] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [message, setMessage] = useState(null); // { type: "error" | "success", text }
 
   useEffect(() => {
     supabase.auth.getSession().then(({ data }) => setSession(data.session));
@@ -26,25 +38,64 @@ export default function AuthWidget() {
     return () => listener.subscription.unsubscribe();
   }, []);
 
-  async function sendMagicLink(e) {
+  async function handleSubmit(e) {
     e.preventDefault();
-    if (!email.trim()) return;
-    setStatus("sending");
-    setErrorMsg("");
-    const { error } = await supabase.auth.signInWithOtp({
-      email: email.trim(),
-      options: { emailRedirectTo: typeof window !== "undefined" ? window.location.origin : undefined },
-    });
-    if (error) {
-      setStatus("error");
-      setErrorMsg(error.message);
-    } else {
-      setStatus("sent");
+    const cleanEmail = email.trim();
+    if (!cleanEmail || !password) return;
+
+    if (mode === "signup" && password.length < 6) {
+      setMessage({ type: "error", text: "Password must be at least 6 characters." });
+      return;
+    }
+
+    setBusy(true);
+    setMessage(null);
+
+    try {
+      if (mode === "signup") {
+        const { data, error } = await supabase.auth.signUp({
+          email: cleanEmail,
+          password,
+        });
+        if (error) throw error;
+
+        // If email confirmation is enabled in Supabase, signUp returns a
+        // user but no session — the account isn't usable yet. Say so
+        // plainly rather than appearing to succeed silently.
+        if (data.user && !data.session) {
+          setMessage({
+            type: "success",
+            text: "Account created. Check your email to confirm before signing in.",
+          });
+        } else {
+          setMessage({ type: "success", text: "Account created — you're signed in." });
+          setPassword("");
+        }
+      } else {
+        const { error } = await supabase.auth.signInWithPassword({
+          email: cleanEmail,
+          password,
+        });
+        if (error) throw error;
+        setPassword("");
+      }
+    } catch (err) {
+      const raw = err?.message || "Something went wrong. Please try again.";
+      // Supabase's wording here is opaque to end users.
+      const friendly = /invalid login credentials/i.test(raw)
+        ? "Wrong email or password. If you haven't registered yet, choose Create account."
+        : /already registered/i.test(raw)
+        ? "That email is already registered — try signing in instead."
+        : raw;
+      setMessage({ type: "error", text: friendly });
+    } finally {
+      setBusy(false);
     }
   }
 
   async function signOut() {
     await supabase.auth.signOut();
+    setMessage(null);
   }
 
   if (session) {
@@ -58,32 +109,55 @@ export default function AuthWidget() {
     );
   }
 
-  if (status === "sent") {
-    return (
-      <p className="font-mono text-xs text-moss">
-        Check {email} for a sign-in link.
-      </p>
-    );
-  }
-
   return (
-    <form onSubmit={sendMagicLink} className="flex items-center gap-2">
-      <input
-        type="email"
-        required
-        placeholder="you@example.com"
-        value={email}
-        onChange={(e) => setEmail(e.target.value)}
-        className="border border-paper-line rounded-sm px-2 py-1 text-xs font-body bg-paper"
-      />
-      <button
-        type="submit"
-        disabled={status === "sending"}
-        className="bg-ink text-paper rounded-sm px-3 py-1 text-xs font-mono uppercase tracking-wide disabled:opacity-50"
-      >
-        {status === "sending" ? "Sending..." : "Sign in"}
-      </button>
-      {status === "error" && <span className="text-xs text-seal">{errorMsg}</span>}
-    </form>
+    <div className="space-y-2">
+      <form onSubmit={handleSubmit} className="flex flex-wrap items-center gap-2">
+        <input
+          type="email"
+          required
+          autoComplete="email"
+          placeholder="you@example.com"
+          value={email}
+          onChange={(e) => setEmail(e.target.value)}
+          className="border border-paper-line rounded-sm px-2 py-1 text-xs font-body bg-paper"
+        />
+        <input
+          type="password"
+          required
+          autoComplete={mode === "signup" ? "new-password" : "current-password"}
+          placeholder="Password"
+          value={password}
+          onChange={(e) => setPassword(e.target.value)}
+          className="border border-paper-line rounded-sm px-2 py-1 text-xs font-body bg-paper"
+        />
+        <button
+          type="submit"
+          disabled={busy}
+          className="bg-ink text-paper rounded-sm px-3 py-1 text-xs font-mono uppercase tracking-wide disabled:opacity-50"
+        >
+          {busy ? "..." : mode === "signup" ? "Create account" : "Sign in"}
+        </button>
+        <button
+          type="button"
+          onClick={() => {
+            setMode(mode === "signup" ? "signin" : "signup");
+            setMessage(null);
+          }}
+          className="font-mono text-[11px] text-ink-faint underline hover:text-ink"
+        >
+          {mode === "signup" ? "Have an account? Sign in" : "New here? Create account"}
+        </button>
+      </form>
+
+      {message && (
+        <p
+          className={
+            "font-mono text-[11px] " + (message.type === "error" ? "text-seal" : "text-moss")
+          }
+        >
+          {message.text}
+        </p>
+      )}
+    </div>
   );
 }
