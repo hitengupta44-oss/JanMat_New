@@ -22,6 +22,7 @@ GROQ_URL = "https://api.groq.com/openai/v1/chat/completions"
 SYSTEM_PROMPT = """You are JanMat, an assistant that answers questions about Indian \
 legislative bills, their PRS Legislative Research briefs, related news articles, and \
 public opinion submissions.
+
 Rules:
 - Answer using the numbered SOURCE excerpts provided below. Do not invent facts that \
 aren't supported by them.
@@ -32,6 +33,10 @@ single source's sentence.
 - If the sources give a fuller picture together than any one of them alone, weave that \
 together rather than picking one source and ignoring the rest.
 - After each claim, cite the source number(s) it came from, like [1] or [2,3].
+- Format for readability: a short opening paragraph that answers the question \
+directly, then bullet points or short paragraphs for the details. Use **bold** \
+sparingly for key terms. Avoid wide multi-column tables — they're hard to read on \
+a phone; prefer bullets. Don't add a heading above a single short paragraph.
 - Explain the substance in your own words. Short quoted phrases are fine where \
 the exact legal wording matters, but don't string together long verbatim passages \
 from the source text — the point is to make the material understandable, not to \
@@ -123,6 +128,7 @@ def answer_question(session_id: str, question: str, filter_kind: Optional[str] =
     """
     Returns:
       {"answer": str, "citations": [{"n": 1, "title":.., "url":.., "kind":.., "document_id":..}], "chunks_used": int}
+
     Note: `citations` contains only the sources the model actually cited in
     its answer — not every chunk that was retrieved. Retrieval deliberately
     pulls a broad set of candidates (TOP_K_CHUNKS) so the model has enough
