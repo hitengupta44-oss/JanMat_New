@@ -1,9 +1,11 @@
 """
 JanMat — single Gradio Space.
+
 Replaces the old bills/themes/sentiment dashboard with a chat interface that
 answers questions using Groq, grounded in the full text of scraped PRS bill
 pages + PDFs + articles (stored in Supabase), with optional voice in/out via
 Sarvam AI.
+
 Everything lives in this one Space, same as your original setup — no
 separate frontend needed.
 """
@@ -50,13 +52,27 @@ def _ensure_session(session_id):
     return session_id or db.create_session()
 
 
+def _clean_source_title(title: str) -> str:
+    """
+    Source titles are often raw PDF filenames like
+    'Corporate_Laws_(A)_Bill_2026_Text.pdf' — turn those into something
+    readable before showing them to a citizen.
+    """
+    name = title.strip()
+    if name.lower().endswith(".pdf"):
+        name = name[:-4]
+    name = name.replace("_", " ").replace("%2C", ",")
+    # Collapse the double spaces that underscore-stripping can leave behind.
+    return " ".join(name.split())
+
+
 def _format_answer_with_sources(answer: str, citations: list) -> str:
     if not citations:
         return answer
     lines = "\n".join(
-        f"[{c['n']}] {c['title']} ({c['kind']}) — {c['url']}" for c in citations
+        f"{c['n']}. [{_clean_source_title(c['title'])}]({c['url']})" for c in citations
     )
-    return f"{answer}\n\n**Sources:**\n{lines}"
+    return f"{answer}\n\n---\n\n**Sources**\n\n{lines}"
 
 
 def chat_fn(message, history, session_id):
