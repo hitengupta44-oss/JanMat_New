@@ -195,8 +195,9 @@ export default function Page() {
           JanMat
         </h1>
         <p className="font-body text-sm text-ink-faint mt-3 max-w-xl leading-relaxed">
-          A plain-language snapshot of public feedback on tracked bills — sentiment scored and
-          clustered into themes so the volume is readable, not just archived.
+          Ask questions about Indian bills and get answers grounded in their actual text —
+          alongside sentiment, themes and word clouds drawn from stakeholder feedback on
+          draft legislation.
         </p>
         <div className="mt-4">
           <AuthWidget />
