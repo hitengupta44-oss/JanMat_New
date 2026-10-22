@@ -14,6 +14,8 @@ import requests
 from bs4 import BeautifulSoup
 from pypdf import PdfReader
 
+import tinyfish_client
+
 logger = logging.getLogger("janmat.pdf_ingest")
 
 # A browser-like User-Agent. Several government sites (indiacode.nic.in,
@@ -125,7 +127,7 @@ def extract_html_article(html: str, base_url: str) -> dict:
     return {"title": title, "full_text": full_text, "pdf_links": sorted(set(pdf_links))}
 
 
-def ingest_source_document(url: str) -> dict:
+def _ingest_direct(url: str) -> dict:
     """
     Fetches whatever is at `url`, figures out if it's a PDF or HTML, and
     returns the full extracted text ready for chunking.
@@ -167,3 +169,22 @@ def ingest_source_document(url: str) -> dict:
         "full_text": parsed["full_text"],
         "pdf_links": parsed["pdf_links"],
     }
+
+
+def _ingest_via_tinyfish(url: str) -> dict:
+    """TinyFish Fetch renders the page in a real browser and extracts PDF or
+    HTML text, so it succeeds on hosts that return 403/SSL errors to us."""
+    page = tinyfish_client.fetch_text(url)
+    return {"title": page["title"], "kind_hint": "html", "pages": [], "full_text": page["text"], "pdf_links": []}
+
+
+def ingest_source_document(url: str) -> dict:
+    """Direct fetch first; if that fails (403, SSL, timeout, blocklisted host)
+    and a TinyFish key is configured, retry through TinyFish Fetch."""
+    try:
+        return _ingest_direct(url)
+    except Exception as exc:
+        if not tinyfish_client.enabled():
+            raise
+        logger.info("Direct fetch failed for %s (%s); retrying via TinyFish", url, exc)
+        return _ingest_via_tinyfish(url)

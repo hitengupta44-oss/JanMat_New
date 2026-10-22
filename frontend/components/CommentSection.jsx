@@ -12,7 +12,12 @@
 import { useEffect, useState } from "react";
 import { supabase } from "../lib/supabaseClient";
 
-export default function CommentSection({ topicKey, topicTitle }) {
+export function maskEmail(email = "") {
+  const [name = "", domain = ""] = email.split("@");
+  return `${name.length > 2 ? name.slice(0, 2) : ""}***@${domain}`;
+}
+
+export default function CommentSection({ topicKey, topicTitle, onPosted }) {
   const [session, setSession] = useState(null);
   const [comments, setComments] = useState(null);
   const [body, setBody] = useState("");
@@ -29,8 +34,8 @@ export default function CommentSection({ topicKey, topicTitle }) {
     let cancelled = false;
     async function loadComments() {
       const { data, error: fetchError } = await supabase
-        .from("comments")
-        .select("id, body, author_email, created_at")
+        .from("public_comments")
+        .select("id, topic_key, topic_title, body, author_label, created_at")
         .eq("topic_key", topicKey)
         .order("created_at", { ascending: false });
       if (!cancelled) {
@@ -59,7 +64,7 @@ export default function CommentSection({ topicKey, topicTitle }) {
         author_email: session.user.email,
         body: body.trim(),
       })
-      .select("id, body, author_email, created_at")
+      .select("id, topic_key, topic_title, body, author_email, created_at")
       .single();
 
     setPosting(false);
@@ -67,7 +72,16 @@ export default function CommentSection({ topicKey, topicTitle }) {
       setError(insertError.message);
       return;
     }
-    setComments((prev) => [data, ...(prev || [])]);
+    const posted = {
+      id: data.id,
+      topic_key: data.topic_key,
+      topic_title: data.topic_title,
+      body: data.body,
+      created_at: data.created_at,
+      author_label: maskEmail(data.author_email),
+    };
+    setComments((prev) => [posted, ...(prev || [])]);
+    onPosted?.(posted);
     setBody("");
   }
 
@@ -115,7 +129,7 @@ export default function CommentSection({ topicKey, topicTitle }) {
           {comments.map((c) => (
             <li key={c.id} className="border border-paper-line rounded-sm px-3 py-2 bg-paper/60">
               <div className="flex items-baseline justify-between gap-2 mb-1">
-                <span className="font-mono text-[10px] text-ink-faint">{c.author_email}</span>
+                <span className="font-mono text-[10px] text-ink-faint">{c.author_label}</span>
                 <span className="font-mono text-[10px] text-ink-faint">
                   {new Date(c.created_at).toLocaleDateString()}
                 </span>

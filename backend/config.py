@@ -41,6 +41,10 @@ SARVAM_TTS_MODEL = os.getenv("SARVAM_TTS_MODEL", "bulbul:v3")
 SARVAM_DEFAULT_SPEAKER = os.getenv("SARVAM_DEFAULT_SPEAKER", "anushka")
 SARVAM_DEFAULT_LANGUAGE = os.getenv("SARVAM_DEFAULT_LANGUAGE", "en-IN")
 
+# --- TinyFish (live web: Search, Fetch, Agent) -------------------------------
+# Optional. Leave unset and JanMat behaves exactly as before.
+TINYFISH_API_KEY = os.getenv("TINYFISH_API_KEY", "")
+
 # --- Cron / admin protection ---------------------------------------------------
 CRON_SECRET = os.getenv("CRON_SECRET", "")
 
@@ -78,6 +82,20 @@ CONFIG = {
     # Add more sources here as plain "seed URL lists" — the ingestion pipeline
     # treats any HTTP(S) URL the same way: fetch, detect PDF vs HTML, extract
     # full text, chunk, embed, store. See scraper.py:ArticleSource.
+    # Used only when TINYFISH_API_KEY is set.
+    "tinyfish": {
+        # Search API: finds drafts / news / stakeholder reactions beyond PRS.
+        "search_queries": [
+            "draft bill public consultation stakeholder comments India",
+            "Ministry of Corporate Affairs draft amendment comments invited",
+        ],
+        "results_per_query": 5,
+        # Agent API: pages whose public comments should be extracted. Add the
+        # consultation pages you are allowed to read (e.g. MCA draft pages).
+        "consultation_urls": [],
+        # Also run the agent on this many PRS bill pages per run (Agent runs are billed).
+        "agent_max_bill_pages": 3,
+    },
     "article_seed_urls": [
         # "https://example-news-site.com/article-about-a-bill",
     ],

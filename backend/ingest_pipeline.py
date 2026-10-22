@@ -13,7 +13,9 @@ import db
 from config import CONFIG
 from embeddings import chunk_pages, chunk_text, embed_texts
 from pdf_ingest import ingest_source_document, BlockedHostError
-from scraper import PRSDiscovery, DiscoveredDocument, discover_article_seed_urls
+import tinyfish_client
+from scraper import (PRSDiscovery, DiscoveredDocument, discover_article_seed_urls,
+                     discover_via_tinyfish_search, discover_comment_documents)
 
 logger = logging.getLogger("janmat.ingest_pipeline")
 
@@ -22,7 +24,10 @@ def _ingest_one(doc: DiscoveredDocument) -> dict:
     """Fetch, extract, chunk, embed, and store a single discovered document."""
     result = {"url": doc.url, "status": "skipped", "chunks": 0}
     try:
-        extracted = ingest_source_document(doc.url)
+        if doc.text:
+            extracted = {"title": doc.title, "kind_hint": "html", "pages": [], "full_text": doc.text, "pdf_links": []}
+        else:
+            extracted = ingest_source_document(doc.url)
     except BlockedHostError:
         # Known-unreachable host — not a real failure, so don't log a
         # traceback or write a failed row to `documents`.
@@ -155,6 +160,20 @@ def run_ingestion() -> dict:
                 continue
             processed_urls.add(article_doc.url)
             _record(_ingest_one(article_doc))
+
+        # 3. TinyFish (optional): live-web discovery + structured comment extraction.
+        if tinyfish_client.enabled():
+            tf = CONFIG["tinyfish"]
+            extra = discover_via_tinyfish_search(tf["search_queries"], tf["results_per_query"])
+            agent_pages = [DiscoveredDocument(url=u, kind="bill_page", source="consultation", title=u)
+                           for u in tf["consultation_urls"]]
+            agent_pages += bill_pages[: tf["agent_max_bill_pages"]]
+            extra += discover_comment_documents(agent_pages)
+            for d in extra:
+                if d.url in processed_urls:
+                    continue
+                processed_urls.add(d.url)
+                _record(_ingest_one(d))
 
         db.finish_ingestion_run(run_id, datetime.now(timezone.utc).isoformat(), "success", summary)
     except Exception as exc:
