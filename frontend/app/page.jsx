@@ -10,7 +10,7 @@
  * Everyone can read them without signing in; posting needs an account.
  */
 import { useEffect, useMemo, useState } from "react";
-import { supabase } from "../lib/supabaseClient";
+import { supabase, explainSupabaseError } from "../lib/supabaseClient";
 import JanMatChatWidget from "../components/JanMatChatWidget";
 import AuthWidget from "../components/AuthWidget";
 import CommentSection from "../components/CommentSection";
@@ -57,16 +57,27 @@ export default function Page() {
   useEffect(() => {
     let cancelled = false;
     (async () => {
-      const [b, c] = await Promise.all([
+      let b, c;
+      try {
+        [b, c] = await Promise.all([
         supabase.from("public_bills").select("id, title, url, status").order("title"),
         supabase
           .from("public_comments")
           .select("id, topic_key, topic_title, body, author_label, created_at")
           .order("created_at", { ascending: false })
           .limit(1000),
-      ]);
+        ]);
+      } catch (e) {
+        // Network-level failure (supabase-js normally returns {error}, but be safe).
+        if (!cancelled) {
+          setError(explainSupabaseError(e));
+          setBills([]);
+          setComments([]);
+        }
+        return;
+      }
       if (cancelled) return;
-      if (b.error || c.error) setError((b.error || c.error).message);
+      if (b.error || c.error) setError(explainSupabaseError(b.error || c.error));
       setBills(b.data || []);
       setComments(c.data || []);
     })();
@@ -110,7 +121,8 @@ export default function Page() {
       <section aria-label="Tracked bills" className="mb-14">
         <p className="font-mono text-xs tracking-[0.2em] text-marigold uppercase mb-3">Comment on a bill</p>
         {bills === null && <p className="font-mono text-xs text-ink-faint">Loading bills…</p>}
-        {bills && bills.length === 0 && (
+        {error && <p className="font-mono text-xs text-seal">{error}</p>}
+        {bills && bills.length === 0 && !error && (
           <p className="font-mono text-xs text-ink-faint">
             No bills yet. Run ingestion from the Space&apos;s Admin panel to load them.
           </p>

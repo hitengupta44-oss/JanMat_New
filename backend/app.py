@@ -19,6 +19,7 @@ import rag
 import voice
 from config import CRON_SECRET
 from ingest_pipeline import run_ingestion
+import tinyfish_client
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("janmat.app")
@@ -168,7 +169,51 @@ def ingestion_status_fn(secret):
         f"unchanged: {summary.get('unchanged', 0)}, "
         f"skipped: {summary.get('skipped', 0)}, "
         f"failed: {summary.get('failed', 0)}"
+        + _tinyfish_status_line(summary)
     )
+
+
+def _tinyfish_status_line(summary) -> str:
+    by_src = summary.get("ingested_by_source") or {}
+    tf = summary.get("tinyfish") or {}
+    if not tf and not any(k.startswith("tinyfish") for k in by_src):
+        return ""
+    return (
+        "\nTinyFish — "
+        f"Search: {tf.get('search_calls', 0)} queries → {tf.get('search_results', 0)} results "
+        f"({by_src.get('tinyfish_search', 0)} ingested) | "
+        f"Fetch fallback: {tf.get('fetch_ok', 0)}/{tf.get('fetch_calls', 0)} pages recovered | "
+        f"Agent: {tf.get('agent_runs', 0)} runs, {tf.get('agent_steps', 0)} steps → "
+        f"{tf.get('agent_comments', 0)} stakeholder comments ({by_src.get('tinyfish_agent', 0)} docs ingested)"
+    )
+
+
+def tinyfish_demo_fn(secret, mode, target):
+    """Admin-only live check of each TinyFish API, so the integration can be shown working."""
+    if not CRON_SECRET or secret != CRON_SECRET:
+        return "❌ Incorrect secret."
+    if not tinyfish_client.enabled():
+        return "TINYFISH_API_KEY is not set. Add it as a Space secret and restart."
+    target = (target or "").strip()
+    if not target:
+        return "Enter a search query (Search) or a URL (Fetch / Agent)."
+    try:
+        if mode.startswith("Search"):
+            hits = tinyfish_client.search(target, max_results=5)
+            if not hits:
+                return "Search returned no results."
+            return "\n\n".join(f"{i}. {h['title']}\n   {h['url']}\n   {h['snippet'][:200]}" for i, h in enumerate(hits, 1))
+        if mode.startswith("Fetch"):
+            page = tinyfish_client.fetch_text(target)
+            text = page["text"]
+            return f"Title: {page['title']}\nFinal URL: {page['final_url']}\nCharacters: {len(text)}\n\n{text[:3000]}"
+        comments = tinyfish_client.collect_comments(target)
+        if not comments:
+            return "Agent finished but found no public comments on that page."
+        return f"Agent extracted {len(comments)} comments:\n\n" + "\n\n".join(
+            f"• {c['stakeholder']}: {c['comment'][:300]}" for c in comments[:10])
+    except Exception as exc:
+        return f"TinyFish call failed: {exc}"
 
 
 with gr.Blocks(title="JanMat — Ask about Indian Bills") as demo:
@@ -179,7 +224,10 @@ with gr.Blocks(title="JanMat — Ask about Indian Bills") as demo:
         "grounded in what's actually been read into the knowledge base, with sources cited."
     )
 
-    session_state = gr.State(value=None)
+    # Hidden Textbox rather than gr.State: gr.State values are NOT returned over the /call/<api>
+    # HTTP API, so the website never received the session id and every message started a
+    # brand-new conversation (no chat memory). A hidden Textbox round-trips normally.
+    session_state = gr.Textbox(value="", visible=False)
 
     chatbot = gr.Chatbot(height=460, label="Conversation")
 
@@ -209,6 +257,18 @@ with gr.Blocks(title="JanMat — Ask about Indian Bills") as demo:
         run_btn.click(run_ingestion_fn, [secret_box], [status_box])
         status_btn.click(ingestion_status_fn, [secret_box], [status_box])
 
+        gr.Markdown(
+            "### TinyFish live-web check\n"
+            "Try each TinyFish API directly. **Search** and **Fetch** are free; **Agent** uses "
+            "TinyFish credits (about 1 credit per step). Uses the secret above."
+        )
+        tf_mode = gr.Radio(["Search (query)", "Fetch (URL)", "Agent: extract comments (URL)"],
+                           value="Search (query)", label="TinyFish API")
+        tf_target = gr.Textbox(label="Query or URL", placeholder="draft bill public consultation stakeholder comments India")
+        tf_btn = gr.Button("Run TinyFish")
+        tf_out = gr.Textbox(label="Result", lines=12, interactive=False)
+        tf_btn.click(tinyfish_demo_fn, [secret_box, tf_mode, tf_target], [tf_out], api_name=False)
+
 
 if __name__ == "__main__":
-    demo.queue().launch(server_name="0.0.0.0", server_port=7860)
+    demo.queue().launch(server_name="0.0.0.0", server_port=7860, show_error=True)

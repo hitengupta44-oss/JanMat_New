@@ -7,3 +7,8 @@ lxml==5.3.0
 pypdf==5.1.0
 python-dotenv==1.0.1
 sentence-transformers==3.3.1
+# gradio 4.44.0 imports HfFolder, which huggingface_hub>=1.0 removed. Without this pin the
+# Space crashes on startup ("cannot import name 'HfFolder'") and the site shows
+# "couldn't reach the chatbot".
+huggingface_hub>=0.25,<1.0
+transformers>=4.41,<5

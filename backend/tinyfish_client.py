@@ -22,6 +22,16 @@ from config import TINYFISH_API_KEY
 
 logger = logging.getLogger("janmat.tinyfish")
 
+# Running tally of TinyFish calls, reset at the start of each ingestion run and
+# shown in the Admin status. Gives a visible, honest record of what TinyFish did.
+stats = {"search_calls": 0, "search_results": 0, "fetch_calls": 0, "fetch_ok": 0,
+         "agent_runs": 0, "agent_steps": 0, "agent_comments": 0}
+
+
+def reset_stats() -> None:
+    for k in stats:
+        stats[k] = 0
+
 FETCH_URL = "https://api.fetch.tinyfish.ai"
 SEARCH_URL = "https://api.search.tinyfish.ai"
 AGENT_RUN_URL = "https://agent.tinyfish.ai/v1/automation/run"
@@ -47,6 +57,7 @@ def _headers() -> dict:
 
 def fetch_text(url: str, timeout: int = 90) -> dict:
     """Returns {"title", "text", "final_url"}. Raises if TinyFish cannot fetch it."""
+    stats["fetch_calls"] += 1
     resp = requests.post(FETCH_URL, headers=_headers(), json={"urls": [url], "format": "markdown"}, timeout=timeout)
     resp.raise_for_status()
     data = resp.json()
@@ -57,6 +68,7 @@ def fetch_text(url: str, timeout: int = 90) -> dict:
     text = (page.get("text") or "").strip()
     if not text:
         raise RuntimeError(f"TinyFish Fetch returned empty text for {url}")
+    stats["fetch_ok"] += 1
     return {
         "title": page.get("title") or url.rsplit("/", 1)[-1],
         "text": text,
@@ -66,6 +78,7 @@ def fetch_text(url: str, timeout: int = 90) -> dict:
 
 def search(query: str, max_results: int = 5) -> List[dict]:
     """Returns [{"url", "title", "snippet"}, ...]."""
+    stats["search_calls"] += 1
     resp = requests.get(SEARCH_URL, headers=_headers(), params={"query": query}, timeout=30)
     resp.raise_for_status()
     out = []
@@ -73,6 +86,7 @@ def search(query: str, max_results: int = 5) -> List[dict]:
         url = item.get("url") or item.get("link")
         if url:
             out.append({"url": url, "title": item.get("title") or url, "snippet": item.get("snippet") or ""})
+    stats["search_results"] += len(out)
     return out
 
 
@@ -81,9 +95,12 @@ def collect_comments(url: str, timeout: int = 300) -> List[dict]:
     Runs one Agent API automation on `url` and returns
     [{"stakeholder": str, "comment": str}, ...]. Empty list if nothing found.
     """
+    stats["agent_runs"] += 1
     resp = requests.post(AGENT_RUN_URL, headers=_headers(), json={"url": url, "goal": COMMENTS_GOAL}, timeout=timeout)
     resp.raise_for_status()
     data = resp.json()
+    # Agent steps are what TinyFish bills for (1 credit each); record them if the API reports them.
+    stats["agent_steps"] += int(data.get("num_of_steps") or 0)
     if data.get("status") != "COMPLETED":
         raise RuntimeError(f"TinyFish agent run did not complete for {url}: {data.get('status')}")
     result = data.get("result") or {}
@@ -97,6 +114,7 @@ def collect_comments(url: str, timeout: int = 300) -> List[dict]:
     for it in items:
         if isinstance(it, dict) and str(it.get("comment") or "").strip():
             cleaned.append({"stakeholder": str(it.get("stakeholder") or "Unnamed").strip(), "comment": str(it["comment"]).strip()})
+    stats["agent_comments"] += len(cleaned)
     return cleaned
 
 

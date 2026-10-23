@@ -22,7 +22,7 @@ logger = logging.getLogger("janmat.ingest_pipeline")
 
 def _ingest_one(doc: DiscoveredDocument) -> dict:
     """Fetch, extract, chunk, embed, and store a single discovered document."""
-    result = {"url": doc.url, "status": "skipped", "chunks": 0}
+    result = {"url": doc.url, "status": "skipped", "chunks": 0, "source": doc.source}
     try:
         if doc.text:
             extracted = {"title": doc.title, "kind_hint": "html", "pages": [], "full_text": doc.text, "pdf_links": []}
@@ -111,8 +111,10 @@ def run_ingestion() -> dict:
         "unchanged": 0,
         "failed": 0,
         "skipped": 0,
+        "ingested_by_source": {},   # e.g. {"prs": 20, "tinyfish_search": 6, "tinyfish_agent": 2}
         "results": [],
     }
+    tinyfish_client.reset_stats()
 
     # Multiple bill pages often link to the same PDF. Without this guard the
     # same file gets fetched, extracted and embedded once per referring page —
@@ -125,6 +127,8 @@ def run_ingestion() -> dict:
         summary["results"].append(result)
         if result["status"] == "ingested":
             summary["ingested"] += 1
+            src = result.get("source", "unknown")
+            summary["ingested_by_source"][src] = summary["ingested_by_source"].get(src, 0) + 1
         elif result["status"] == "unchanged":
             summary["unchanged"] += 1
         elif result["status"] == "failed":
@@ -175,6 +179,7 @@ def run_ingestion() -> dict:
                 processed_urls.add(d.url)
                 _record(_ingest_one(d))
 
+        summary["tinyfish"] = dict(tinyfish_client.stats)
         db.finish_ingestion_run(run_id, datetime.now(timezone.utc).isoformat(), "success", summary)
     except Exception as exc:
         logger.exception("Ingestion run failed")

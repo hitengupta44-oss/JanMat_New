@@ -10,7 +10,7 @@
  * the bill/article's URL is a natural choice since it's already unique.
  */
 import { useEffect, useState } from "react";
-import { supabase } from "../lib/supabaseClient";
+import { supabase, explainSupabaseError } from "../lib/supabaseClient";
 
 export function maskEmail(email = "") {
   const [name = "", domain = ""] = email.split("@");
@@ -39,7 +39,7 @@ export default function CommentSection({ topicKey, topicTitle, onPosted }) {
         .eq("topic_key", topicKey)
         .order("created_at", { ascending: false });
       if (!cancelled) {
-        if (fetchError) setError(fetchError.message);
+        if (fetchError) setError(explainSupabaseError(fetchError));
         else setComments(data);
       }
     }
@@ -69,7 +69,7 @@ export default function CommentSection({ topicKey, topicTitle, onPosted }) {
 
     setPosting(false);
     if (insertError) {
-      setError(insertError.message);
+      setError(explainSupabaseError(insertError));
       return;
     }
     const posted = {

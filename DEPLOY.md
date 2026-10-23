@@ -122,7 +122,8 @@ Supabase > **Authentication > URL Configuration**:
    - `consultation_urls`: public consultation pages whose comments the agent should extract
    - `agent_max_bill_pages`: how many PRS bill pages the agent reads per run (Agent runs are billed, so keep this small)
 3. Admin tab > **Run ingestion now**. With the key set, ingestion also: retries failed downloads through TinyFish Fetch, adds web search results, and stores agent-extracted comments as searchable documents.
-4. Without the key, nothing changes.
+4. To see TinyFish working, open the Admin accordion again: the **TinyFish live check** lets you run Search, Fetch and Agent on their own, and **Check status** now ends with a TinyFish usage line.
+5. Without the key, nothing changes.
 
 ---
 
@@ -172,3 +173,13 @@ npm install && npm run dev                   # http://localhost:3000
 - `service_role` and all API keys live only in Space secrets.
 - The Groq and Sarvam quotas are open to anyone who can use the chat; add per-IP rate limiting before sharing widely.
 - With **Confirm email** off, anyone can register an address they don't own.
+
+---
+
+## 8. If something breaks
+
+| Symptom | Fix |
+|---|---|
+| Site shows comments error `Failed to fetch` or still shows an old layout | Supabase free projects **pause after 7 idle days**. Open the Supabase dashboard and restore the project, confirm `NEXT_PUBLIC_SUPABASE_URL` is correct, then **Redeploy** on Vercel. If the old layout persists, open Vercel > Deployments: the newest deployment probably failed to build; read its log. |
+| Space crashes with `cannot import name 'HfFolder'` | Keep `huggingface_hub>=0.25,<1.0` in `backend/requirements.txt` (Gradio 4.44 needs it), then restart the Space. |
+| Comments list says the views are missing | Run `supabase/migration_public_comments.sql` (step 2.3). |
