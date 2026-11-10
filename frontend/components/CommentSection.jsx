@@ -31,8 +31,15 @@ export function CommentItem({ c, showBill = false }) {
         </p>
       )}
       <div className="flex flex-wrap items-center justify-between gap-2 mb-1">
-        <SentimentBadge sentiment={c.sentiment} score={c.sentiment_score} />
-        <span className="font-mono text-[10px] text-ink-faint">
+        <span className="flex flex-wrap items-center gap-1.5">
+          <SentimentBadge sentiment={c.sentiment} score={c.sentiment_score} />
+          {c.source === "prs" && (
+            <span className="font-mono text-[10px] uppercase tracking-wider text-ink border border-ink rounded-sm px-1.5 py-0.5">
+              From PRS
+            </span>
+          )}
+        </span>
+        <span className="font-mono text-[10px] text-ink-faint break-words">
           {c.author_label} · {new Date(c.created_at).toLocaleDateString()}
         </span>
       </div>
@@ -42,6 +49,16 @@ export function CommentItem({ c, showBill = false }) {
           <span className="font-mono uppercase tracking-wider text-[10px]">Summary: </span>
           {c.summary}
         </p>
+      )}
+      {c.source === "prs" && c.source_url && (
+        <a
+          href={c.source_url}
+          target="_blank"
+          rel="noreferrer"
+          className="inline-block mt-1.5 font-mono text-[10px] underline text-ink-faint hover:text-ink"
+        >
+          Source: PRS Legislative Research
+        </a>
       )}
     </li>
   );
@@ -100,6 +117,7 @@ export default function CommentSection({ topicKey, topicTitle, comments, session
       body: data.body,
       created_at: data.created_at,
       author_label: maskEmail(data.author_email),
+      source: "janmat",
       sentiment: null,
       sentiment_score: null,
       summary: null,

@@ -6,7 +6,7 @@
  * Presentational: the page loads the comments and passes them in.
  */
 import { useMemo, useState } from "react";
-import { SENTIMENTS, SENTIMENT_STYLE } from "../lib/sentiment";
+import { SENTIMENTS, SENTIMENT_STYLE, SOURCES, bySource } from "../lib/sentiment";
 import { CommentItem } from "./CommentSection";
 
 const PAGE = 10;
@@ -14,6 +14,7 @@ const PAGE = 10;
 export default function AllComments({ comments, loading, error }) {
   const [bill, setBill] = useState("all");
   const [mood, setMood] = useState("all");
+  const [who, setWho] = useState("all");
   const [shown, setShown] = useState(PAGE);
 
   const bills = useMemo(() => {
@@ -25,7 +26,7 @@ export default function AllComments({ comments, loading, error }) {
     return [...counts.entries()].sort((a, b) => b[1] - a[1]);
   }, [comments]);
 
-  const visible = (comments || []).filter(
+  const visible = bySource(comments || [], who).filter(
     (c) =>
       (bill === "all" || (c.topic_title || "General discussion") === bill) &&
       (mood === "all" || (mood === "pending" ? !c.sentiment : c.sentiment === mood))
@@ -40,6 +41,21 @@ export default function AllComments({ comments, loading, error }) {
           {comments ? `${visible.length} of ${comments.length} comments` : ""}
         </p>
         <div className="flex flex-wrap gap-2 max-w-full">
+          <select
+            value={who}
+            onChange={(e) => {
+              setWho(e.target.value);
+              setShown(PAGE);
+            }}
+            className={selectCls}
+            aria-label="Filter comments by who made them"
+          >
+            {SOURCES.map((s) => (
+              <option key={s.value} value={s.value}>
+                {s.label}
+              </option>
+            ))}
+          </select>
           <select
             value={mood}
             onChange={(e) => {

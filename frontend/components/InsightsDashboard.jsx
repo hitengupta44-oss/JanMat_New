@@ -7,7 +7,7 @@
  * public_comments and public_topic_insights views.
  */
 import { useMemo, useState } from "react";
-import { SENTIMENTS, SENTIMENT_STYLE, countSentiments, downloadCsv } from "../lib/sentiment";
+import { SENTIMENTS, SENTIMENT_STYLE, SOURCES, bySource, countSentiments, downloadCsv } from "../lib/sentiment";
 import { InsightSummary, SentimentBar } from "./SentimentParts";
 import WordCloud from "./WordCloud";
 
@@ -38,7 +38,9 @@ function MiniBar({ counts }) {
 
 export default function InsightsDashboard({ comments, insights, loading }) {
   const [bill, setBill] = useState("all");
-  const all = comments || [];
+  const [who, setWho] = useState("all");
+  const all = useMemo(() => bySource(comments || [], who), [comments, who]);
+  const prsCount = (comments || []).filter((c) => c.source === "prs").length;
 
   const byBill = useMemo(() => {
     const m = new Map();
@@ -77,6 +79,21 @@ export default function InsightsDashboard({ comments, insights, loading }) {
             </option>
           ))}
         </select>
+        <select
+          value={who}
+          onChange={(e) => {
+            setWho(e.target.value);
+            setBill("all");
+          }}
+          className="border border-paper-line rounded-sm px-2 py-1.5 text-xs font-mono bg-paper max-w-full"
+          aria-label="Choose whose comments the dashboard shows"
+        >
+          {SOURCES.map((s) => (
+            <option key={s.value} value={s.value}>
+              {s.label}
+            </option>
+          ))}
+        </select>
         <button
           onClick={() => downloadCsv(scoped, selected ? "janmat-bill-comments.csv" : "janmat-all-comments.csv")}
           disabled={!scoped.length}
@@ -85,6 +102,13 @@ export default function InsightsDashboard({ comments, insights, loading }) {
           Download CSV
         </button>
       </div>
+
+      {prsCount > 0 && who !== "janmat" && (
+        <p className="font-mono text-[10px] text-ink-faint leading-relaxed">
+          Includes {prsCount} stakeholder view{prsCount === 1 ? "" : "s"} extracted from PRS Legislative Research
+          analysis and committee reports, marked &quot;From PRS&quot;.
+        </p>
+      )}
 
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
         <Stat label="Comments" value={scoped.length} />

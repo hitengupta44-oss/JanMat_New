@@ -28,7 +28,8 @@ import { InsightSummary, SentimentBar } from "../components/SentimentParts";
 import WordCloud from "../components/WordCloud";
 
 const JANMAT_SPACE_URL = process.env.NEXT_PUBLIC_JANMAT_SPACE_URL || "https://beastzzz-janmat.hf.space";
-const COMMENT_FIELDS = "id, topic_key, topic_title, body, author_label, created_at, sentiment, sentiment_score, summary";
+const COMMENT_FIELDS =
+  "id, topic_key, topic_title, body, author_label, created_at, sentiment, sentiment_score, summary, source, source_url";
 
 function Eyebrow({ children }) {
   return <p className="font-mono text-xs tracking-[0.2em] text-marigold uppercase mb-3">{children}</p>;

@@ -13,6 +13,18 @@ export const SENTIMENT_STYLE = {
   pending: { label: "Analysing…", text: "text-ink-faint", bg: "bg-paper-line", border: "border-paper-line" },
 };
 
+export const SOURCES = [
+  { value: "all", label: "Everyone" },
+  { value: "janmat", label: "Citizens on JanMat" },
+  { value: "prs", label: "Stakeholders (from PRS)" },
+];
+
+/** Keep comments from one source: "janmat" (citizens), "prs" (stakeholder views), or "all". */
+export function bySource(comments = [], source = "all") {
+  if (source === "all") return comments;
+  return comments.filter((c) => (c.source || "janmat") === source);
+}
+
 export function countSentiments(comments = []) {
   const counts = { positive: 0, neutral: 0, negative: 0, pending: 0 };
   comments.forEach((c) => {
@@ -70,7 +82,7 @@ export function wordSentiment(comments, word) {
 
 /** Download the comments with their analysis as a CSV file (for officials). */
 export function downloadCsv(comments, filename = "janmat-comments.csv") {
-  const cols = ["id", "bill", "created_at", "author", "sentiment", "confidence", "summary", "comment"];
+  const cols = ["id", "bill", "created_at", "source", "author", "sentiment", "confidence", "summary", "comment"];
   const esc = (v) => {
     const s = v === null || v === undefined ? "" : String(v);
     return /[",\n\r]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
@@ -80,6 +92,7 @@ export function downloadCsv(comments, filename = "janmat-comments.csv") {
       c.id,
       c.topic_title || "General discussion",
       c.created_at,
+      c.source === "prs" ? "PRS" : "JanMat",
       c.author_label,
       c.sentiment || "",
       c.sentiment_score ?? "",
