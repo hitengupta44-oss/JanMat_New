@@ -19,6 +19,22 @@ If JanMat does not have the answer, it tells you so. It never makes things up.
 
 ---
 
+## Smart India Hackathon 2025: problem statement SIH25035
+
+**"Sentiment analysis of comments received through E-consultation module"** (Ministry of Corporate Affairs).
+
+| What the problem statement asks for | Where it is in JanMat |
+|---|---|
+| Sentiment of each comment | Every comment gets a **Positive / Neutral / Negative** label with a confidence score (Groq, with a local VADER fallback). |
+| Summary of each comment | A one-line summary is shown under every comment. |
+| Overall summary | An AI summary plus key points for each bill, and one across all bills. |
+| Word cloud | Most-used words, sized by how often they appear and coloured by sentiment, for each bill and overall. |
+| Dashboard for officials | Sentiment split, per-bill breakdown, filters, and **CSV download** of every comment with its analysis. |
+
+Bills come **only from PRS Legislative Research** (prsindia.org), because MCA's e-consultation pages can't be scraped. Anyone can read the comments and the dashboard; **commenting and the chatbot need a free account**.
+
+---
+
 ## Who is it for?
 
 - **Citizens and students** who want to understand a law without a law degree.

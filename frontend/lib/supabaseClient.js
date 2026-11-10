@@ -36,6 +36,9 @@ export function explainSupabaseError(err) {
   if (/failed to fetch|networkerror|load failed/i.test(msg)) {
     return "Can't reach the database. If you run this site: check that the Supabase project isn't paused (free projects pause after 7 idle days) and that NEXT_PUBLIC_SUPABASE_URL is correct, then redeploy.";
   }
+  if (/column .*(sentiment|summary)|public_topic_insights/i.test(msg)) {
+    return "The sentiment-analysis columns are missing. Run supabase/migration_sentiment.sql in the Supabase SQL editor.";
+  }
   if (/relation .* does not exist|schema cache|public_(bills|comments)/i.test(msg)) {
     return "The public comment views are missing. Run supabase/migration_public_comments.sql in the Supabase SQL editor.";
   }

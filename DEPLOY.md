@@ -50,6 +50,7 @@ Do **not** commit real keys. `.env` files are already git-ignored.
 1. **New project.** Pick a region near India (Mumbai) and save the database password.
 2. **SQL Editor > New query.** Paste all of `supabase/schema.sql` and click **Run**. Run it **once only**; re-running errors on the policy lines.
 3. **New query again.** Paste all of `supabase/migration_public_comments.sql` and click **Run**. This turns on Row Level Security, makes comments public with emails masked, and creates the public bills list. It is safe to re-run.
+   Then one more **New query**: paste all of `supabase/migration_sentiment.sql` and click **Run**. This adds the sentiment, summary and overall-summary storage used by the dashboard. It is also safe to re-run.
 4. **Project Settings > API.** Copy three values:
    - Project URL
    - `anon` public key (goes to the frontend)
@@ -81,9 +82,9 @@ Do **not** commit real keys. `.env` files are already git-ignored.
    ```bash
    curl -X POST https://<hf-username>-<space-name>.hf.space/call/chat \
      -H "Content-Type: application/json" \
-     -d '{"data":["hi",[],null]}'
+     -d '{"data":["hi",[],"",""]}'
    ```
-   You should get back `{"event_id": "..."}`. If you get HTML or an error, fix the Space before moving on.
+   You should get back `{"event_id": "..."}`. If you get HTML or an error, fix the Space before moving on. (Without a login token the answer says "Please sign in". That is expected: the chatbot is for signed-in users only.)
 7. Open the Space, go to the **Admin** tab, enter your `CRON_SECRET`, click **Run ingestion now**, and use the status button to follow progress. This loads the bills. It can take a while on the free CPU.
 
 ---
@@ -114,14 +115,13 @@ Supabase > **Authentication > URL Configuration**:
 
 ---
 
-## 6. Turn on TinyFish (optional)
+## 6. Turn on TinyFish (optional, PRS only)
+
+JanMat reads **only prsindia.org**, because MCA's consultation pages can't be scraped. TinyFish is used only to retry PRS pages/PDFs that fail to download and to read stakeholder comments shown on PRS bill pages.
 
 1. Create a key at agent.tinyfish.ai/api-keys and add it as the `TINYFISH_API_KEY` Space secret (step 3.3). The Space restarts.
-2. Open `backend/config.py` (edit it in the Space too) and under `CONFIG["tinyfish"]` set:
-   - `search_queries`: what to look for on the web
-   - `consultation_urls`: public consultation pages whose comments the agent should extract
-   - `agent_max_bill_pages`: how many PRS bill pages the agent reads per run (Agent runs are billed, so keep this small)
-3. Admin tab > **Run ingestion now**. With the key set, ingestion also: retries failed downloads through TinyFish Fetch, adds web search results, and stores agent-extracted comments as searchable documents.
+2. Optionally change `agent_max_bill_pages` under `CONFIG["tinyfish"]` in `backend/config.py`: how many PRS bill pages the agent reads per run (Agent runs are billed, so keep this small).
+3. Admin tab > **Run ingestion now**. With the key set, ingestion also retries failed PRS downloads through TinyFish Fetch and stores agent-extracted PRS stakeholder comments as searchable documents.
 4. To see TinyFish working, open the Admin accordion again: the **TinyFish live check** lets you run Search, Fetch and Agent on their own, and **Check status** now ends with a TinyFish usage line.
 5. Without the key, nothing changes.
 
@@ -129,10 +129,12 @@ Supabase > **Authentication > URL Configuration**:
 
 ## 7. Check that everything works
 
-- [ ] Open your Vercel URL. Type "hi" in the chat. You get an answer (the first reply can take up to a minute if the Space was asleep).
+- [ ] Open your Vercel URL signed out. The chat shows "Sign in to use the chatbot"; the sentiment dashboard and comments are still readable.
+- [ ] Sign in, then type "hi" in the chat. You get an answer (the first reply can take up to a minute if the Space was asleep).
 - [ ] Ask "What is the Insolvency and Bankruptcy Code amendment about?". The answer cites sources.
 - [ ] The **Comment on a bill** list shows bills.
-- [ ] Sign up, open a bill, post a comment. It appears under **What people are saying** with your email masked.
+- [ ] Sign up, open a bill, post a comment. It appears with your email masked and an "Analysing…" badge, which becomes Positive / Neutral / Negative with a one-line summary within a few seconds. The dashboard numbers, word cloud and bill summary update.
+- [ ] Comments posted before this update: Admin tab > **Analyse all comments now** labels them all.
 - [ ] Open the site in a private window (signed out). You can still read every comment.
 
 ---
@@ -147,6 +149,8 @@ Supabase > **Authentication > URL Configuration**:
 | Chat error mentions Supabase | `SUPABASE_URL` or `SUPABASE_SERVICE_KEY` wrong (service_role, not anon). |
 | Bill list says "No bills yet" | Run ingestion in the Admin tab; confirm the migration SQL ran. |
 | Bill list or comments show a red error | Migration SQL not run, so `public_bills` / `public_comments` don't exist. |
+| Error mentions sentiment / summary columns | Run `supabase/migration_sentiment.sql`. |
+| Comments stay "Analysing…" | Check `GROQ_API_KEY` in the Space secrets, then Admin tab > **Analyse all comments now**. |
 | Space shows "config error" | A Dockerfile is present, or the README header was changed. |
 | Sign-up says "email rate limit exceeded" | Turn **Confirm email** off in Supabase. |
 | Login redirects to localhost:3000 | Set the Supabase Site URL (step 5). |

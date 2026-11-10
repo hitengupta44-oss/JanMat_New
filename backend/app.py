@@ -1,10 +1,13 @@
 """
 JanMat — single Gradio Space.
 
-Replaces the old bills/themes/sentiment dashboard with a chat interface that
-answers questions using Groq, grounded in the full text of scraped PRS bill
-pages + PDFs + articles (stored in Supabase), with optional voice in/out via
-Sarvam AI.
+Two jobs (SIH 2025, PS SIH25035 - sentiment analysis of e-consultation comments):
+  1. Chat: answers questions using Groq, grounded in the full text of scraped
+     PRS bill pages + PDFs (stored in Supabase), with optional voice in/out via
+     Sarvam AI. Only signed-in users can chat: every call must carry a valid
+     Supabase access token from the website.
+  2. Comment analysis: labels each public comment positive/negative/neutral,
+     summarises it, and keeps an overall summary per bill (see analysis.py).
 
 Everything lives in this one Space, same as your original setup — no
 separate frontend needed.
@@ -14,6 +17,7 @@ import threading
 
 import gradio as gr
 
+import analysis
 import db
 import rag
 import voice
@@ -49,8 +53,17 @@ _ingestion_lock = threading.Lock()
 _ingestion_state = {"running": False, "last_summary": None}
 
 
-def _ensure_session(session_id):
-    return session_id or db.create_session()
+LOGIN_REQUIRED = "🔒 Please sign in on the JanMat website to use the chatbot."
+
+
+def _ensure_session(session_id, user):
+    """Reuse the chat session only if it belongs to this user; otherwise start a new one."""
+    label = f"user:{user['id']}"
+    if session_id:
+        existing = db.get_session(session_id)
+        if existing and existing.get("label") == label:
+            return session_id
+    return db.create_session(label)
 
 
 def _clean_source_title(title: str) -> str:
@@ -76,11 +89,15 @@ def _format_answer_with_sources(answer: str, citations: list) -> str:
     return f"{answer}\n\n---\n\n**Sources**\n\n{lines}"
 
 
-def chat_fn(message, history, session_id):
+def chat_fn(message, history, session_id, access_token):
     if not message or not message.strip():
         return history, "", session_id
 
-    session_id = _ensure_session(session_id)
+    user = db.get_user_from_token(access_token)
+    if not user:
+        return history + [(message, LOGIN_REQUIRED)], "", session_id
+
+    session_id = _ensure_session(session_id, user)
     db.save_message(session_id, "user", message, input_mode="text")
 
     result = rag.answer_question(session_id, message)
@@ -91,11 +108,15 @@ def chat_fn(message, history, session_id):
     return history, "", session_id
 
 
-def voice_fn(audio_path, history, session_id):
+def voice_fn(audio_path, history, session_id, access_token):
     if audio_path is None:
         return history, session_id, None
 
-    session_id = _ensure_session(session_id)
+    user = db.get_user_from_token(access_token)
+    if not user:
+        return history + [(None, LOGIN_REQUIRED)], session_id, None
+
+    session_id = _ensure_session(session_id, user)
 
     try:
         with open(audio_path, "rb") as f:
@@ -130,6 +151,52 @@ def voice_fn(audio_path, history, session_id):
         logger.exception("Voice turn failed")
         history = history + [(None, f"Voice processing failed: {exc}")]
         return history, session_id, None
+
+
+def analyze_comment_fn(comment_id, access_token):
+    """
+    Called by the website right after a signed-in user posts a comment.
+    Labels the comment's sentiment, summarises it, and refreshes the bill's
+    overall summary. Returns the result as JSON for the page to show at once.
+    """
+    user = db.get_user_from_token(access_token)
+    if not user:
+        return {"ok": False, "error": "login required"}
+    try:
+        cid = int(str(comment_id).strip())
+    except ValueError:
+        return {"ok": False, "error": "bad comment id"}
+
+    comment = db.get_comment(cid)
+    if not comment:
+        return {"ok": False, "error": "comment not found"}
+    if comment.get("analyzed_at"):
+        # Already done: don't spend Groq calls again.
+        return {"ok": True, "comment_id": cid, "sentiment": comment["sentiment"],
+                "score": comment["sentiment_score"], "summary": comment["summary"], "cached": True}
+
+    try:
+        result = analysis.analyze_comment(cid)
+        topic = analysis.refresh_topic(comment["topic_key"])
+        analysis.refresh_all_topics_summary()
+    except Exception as exc:
+        logger.exception("Comment analysis failed")
+        return {"ok": False, "error": str(exc)}
+    return {"ok": True, "comment_id": cid, "sentiment": result["sentiment"], "score": result["score"],
+            "summary": result["summary"], "engine": result["engine"],
+            "topic_summary": (topic or {}).get("overall_summary")}
+
+
+def analyze_all_fn(secret):
+    if not CRON_SECRET or secret != CRON_SECRET:
+        return "❌ Incorrect secret."
+    try:
+        r = analysis.analyze_pending_and_refresh()
+    except Exception as exc:
+        logger.exception("Batch analysis failed")
+        return f"Analysis failed: {exc}"
+    return (f"✅ Labelled {r['analysed']} new comment(s) ({r['failed']} failed). "
+            f"Summaries refreshed for {r['topics']} bill(s)/topic(s).")
 
 
 def run_ingestion_fn(secret):
@@ -219,15 +286,18 @@ def tinyfish_demo_fn(secret, mode, target):
 with gr.Blocks(title="JanMat — Ask about Indian Bills") as demo:
     gr.Markdown(
         "# 🏛️ JanMat\n"
-        "Ask questions about Indian legislative bills, their full PDF briefs, "
-        "related articles, and public opinion — by text or voice. Answers are "
-        "grounded in what's actually been read into the knowledge base, with sources cited."
+        "Ask questions about Indian legislative bills and their PRS Legislative Research "
+        "briefs, by text or voice, and see sentiment analysis of public comments.\n\n"
+        "**The chatbot is for signed-in users of the JanMat website.** This page is the "
+        "backend; use the website to chat and comment."
     )
 
     # Hidden Textbox rather than gr.State: gr.State values are NOT returned over the /call/<api>
     # HTTP API, so the website never received the session id and every message started a
     # brand-new conversation (no chat memory). A hidden Textbox round-trips normally.
     session_state = gr.Textbox(value="", visible=False)
+    # Supabase access token sent by the website; the chat refuses to answer without a valid one.
+    token_box = gr.Textbox(value="", visible=False)
 
     chatbot = gr.Chatbot(height=460, label="Conversation")
 
@@ -240,9 +310,19 @@ with gr.Blocks(title="JanMat — Ask about Indian Bills") as demo:
         mic = gr.Audio(sources=["microphone"], type="filepath", label="Or ask by voice")
         answer_audio = gr.Audio(label="Spoken answer", autoplay=True)
 
-    send_btn.click(chat_fn, [msg, chatbot, session_state], [chatbot, msg, session_state], api_name="chat")
-    msg.submit(chat_fn, [msg, chatbot, session_state], [chatbot, msg, session_state], api_name=False)
-    mic.stop_recording(voice_fn, [mic, chatbot, session_state], [chatbot, session_state, answer_audio], api_name="chat_voice")
+    send_btn.click(chat_fn, [msg, chatbot, session_state, token_box], [chatbot, msg, session_state], api_name="chat")
+    msg.submit(chat_fn, [msg, chatbot, session_state, token_box], [chatbot, msg, session_state], api_name=False)
+    mic.stop_recording(voice_fn, [mic, chatbot, session_state, token_box], [chatbot, session_state, answer_audio],
+                       api_name="chat_voice")
+
+    # API-only endpoint used by the website after a comment is posted.
+    with gr.Row(visible=False):
+        comment_id_box = gr.Textbox()
+        analyze_token_box = gr.Textbox()
+        analyze_out = gr.JSON()
+        analyze_btn = gr.Button()
+    analyze_btn.click(analyze_comment_fn, [comment_id_box, analyze_token_box], [analyze_out],
+                      api_name="analyze_comment")
 
     with gr.Accordion("Admin: refresh the knowledge base", open=False):
         gr.Markdown(
@@ -256,6 +336,15 @@ with gr.Blocks(title="JanMat — Ask about Indian Bills") as demo:
         status_box = gr.Textbox(label="Status", interactive=False)
         run_btn.click(run_ingestion_fn, [secret_box], [status_box])
         status_btn.click(ingestion_status_fn, [secret_box], [status_box])
+
+        gr.Markdown(
+            "### Comment sentiment analysis\n"
+            "Labels every comment that hasn't been analysed yet (positive / negative / neutral + "
+            "one-line summary) and rebuilds the per-bill and overall summaries."
+        )
+        analyze_all_btn = gr.Button("Analyse all comments now")
+        analyze_all_out = gr.Textbox(label="Result", interactive=False)
+        analyze_all_btn.click(analyze_all_fn, [secret_box], [analyze_all_out], api_name=False)
 
         gr.Markdown(
             "### TinyFish live-web check\n"

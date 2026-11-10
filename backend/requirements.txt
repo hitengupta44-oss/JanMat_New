@@ -12,3 +12,5 @@ sentence-transformers==3.3.1
 # "couldn't reach the chatbot".
 huggingface_hub>=0.25,<1.0
 transformers>=4.41,<5
+# Local fallback for comment sentiment when Groq is unavailable (pure Python, tiny).
+vaderSentiment==3.3.2

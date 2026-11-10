@@ -8,16 +8,22 @@ Nothing here summarizes. A document that hasn't changed since last run
 import logging
 from datetime import datetime, timezone
 from typing import List
+from urllib.parse import urlparse
 
 import db
-from config import CONFIG
+from config import CONFIG, ALLOWED_HOSTS
 from embeddings import chunk_pages, chunk_text, embed_texts
 from pdf_ingest import ingest_source_document, BlockedHostError
 import tinyfish_client
-from scraper import (PRSDiscovery, DiscoveredDocument, discover_article_seed_urls,
-                     discover_via_tinyfish_search, discover_comment_documents)
+from scraper import PRSDiscovery, DiscoveredDocument, discover_comment_documents
 
 logger = logging.getLogger("janmat.ingest_pipeline")
+
+
+def is_allowed_url(url: str) -> bool:
+    """PRS only: true for prsindia.org and its subdomains."""
+    host = urlparse(url).netloc.lower().split(":")[0]
+    return any(host == h or host.endswith("." + h) for h in ALLOWED_HOSTS)
 
 
 def _ingest_one(doc: DiscoveredDocument) -> dict:
@@ -154,26 +160,20 @@ def run_ingestion() -> dict:
             for pdf_url in r.get("extra_pdf_links", []):
                 if pdf_url in processed_urls:
                     continue
+                if not is_allowed_url(pdf_url):
+                    # PRS only: skip PDFs hosted on other government sites.
+                    processed_urls.add(pdf_url)
+                    summary["skipped"] += 1
+                    continue
                 processed_urls.add(pdf_url)
                 pdf_doc = discovery.discover_pdfs_from_bill_page(bill_doc, [pdf_url])[0]
                 _record(_ingest_one(pdf_doc))
 
-        # 2. Any additional article/opinion seed URLs from config.
-        for article_doc in discover_article_seed_urls(CONFIG["article_seed_urls"]):
-            if article_doc.url in processed_urls:
-                continue
-            processed_urls.add(article_doc.url)
-            _record(_ingest_one(article_doc))
-
-        # 3. TinyFish (optional): live-web discovery + structured comment extraction.
+        # 2. TinyFish (optional): stakeholder comments shown on PRS bill pages.
         if tinyfish_client.enabled():
             tf = CONFIG["tinyfish"]
-            extra = discover_via_tinyfish_search(tf["search_queries"], tf["results_per_query"])
-            agent_pages = [DiscoveredDocument(url=u, kind="bill_page", source="consultation", title=u)
-                           for u in tf["consultation_urls"]]
-            agent_pages += bill_pages[: tf["agent_max_bill_pages"]]
-            extra += discover_comment_documents(agent_pages)
-            for d in extra:
+            agent_pages = [p for p in bill_pages if is_allowed_url(p.url)][: tf["agent_max_bill_pages"]]
+            for d in discover_comment_documents(agent_pages):
                 if d.url in processed_urls:
                     continue
                 processed_urls.add(d.url)

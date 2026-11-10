@@ -3,7 +3,7 @@ import "./globals.css";
 export const metadata = {
   title: "JanMat — Public Consultation Register",
   description:
-    "A plain-language snapshot of public feedback on tracked bills, built from PRS Legislative Research stakeholder analysis.",
+    "Public comments on draft Indian bills with AI sentiment analysis, summaries and word clouds, plus a chatbot grounded in PRS Legislative Research bill texts.",
 };
 
 export default function RootLayout({ children }) {

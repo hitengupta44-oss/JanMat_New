@@ -79,24 +79,17 @@ CONFIG = {
             "with due acknowledgement of PRS Legislative Research."
         ),
     },
-    # Add more sources here as plain "seed URL lists" — the ingestion pipeline
-    # treats any HTTP(S) URL the same way: fetch, detect PDF vs HTML, extract
-    # full text, chunk, embed, store. See scraper.py:ArticleSource.
-    # Used only when TINYFISH_API_KEY is set.
+    # PRS ONLY. MCA's e-consultation pages can't be scraped, so JanMat reads
+    # nothing but prsindia.org. Links on PRS pages that point to other sites
+    # (gazette, ministries, courts) are skipped.
+    # TinyFish (used only when TINYFISH_API_KEY is set) is limited to PRS too:
+    # Fetch retries PRS pages/PDFs that fail to download directly, and the
+    # Agent reads stakeholder comments shown on PRS bill pages.
     "tinyfish": {
-        # Search API: finds drafts / news / stakeholder reactions beyond PRS.
-        "search_queries": [
-            "draft bill public consultation stakeholder comments India",
-            "Ministry of Corporate Affairs draft amendment comments invited",
-        ],
-        "results_per_query": 5,
-        # Agent API: pages whose public comments should be extracted. Add the
-        # consultation pages you are allowed to read (e.g. MCA draft pages).
-        "consultation_urls": [],
-        # Also run the agent on this many PRS bill pages per run (Agent runs are billed).
+        # Run the agent on this many PRS bill pages per run (Agent runs are billed).
         "agent_max_bill_pages": 3,
     },
-    "article_seed_urls": [
-        # "https://example-news-site.com/article-about-a-bill",
-    ],
 }
+
+# Only URLs on these hosts (or their subdomains) are ever ingested.
+ALLOWED_HOSTS = ("prsindia.org",)
